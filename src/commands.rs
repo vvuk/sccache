@@ -32,6 +32,7 @@ use std::ffi::{OsStr,OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{
     self,
+    Read,
     Write,
 };
 #[cfg(unix)]
@@ -44,7 +45,9 @@ use tokio_core::reactor::Core;
 use util::run_input_output;
 use which::which_in;
 
+use env_splitter::*;
 use errors::*;
+use osstringext::OsStrExt2;
 
 /// The default sccache server port.
 pub const DEFAULT_PORT: u16 = 4226;
@@ -539,7 +542,7 @@ pub fn do_compile<T>(creator: T,
                      core: &mut Core,
                      mut conn: ServerConnection,
                      exe: &Path,
-                     cmdline: Vec<OsString>,
+                     raw_cmdline: Vec<OsString>,
                      cwd: &Path,
                      path: Option<OsString>,
                      env_vars: Vec<(OsString, OsString)>,
@@ -549,6 +552,18 @@ pub fn do_compile<T>(creator: T,
 {
     trace!("do_compile");
     let exe_path = which_in(exe, path, &cwd)?;
+    let cmdline = raw_cmdline.iter().flat_map(|arg| {
+        if arg.starts_with(&[b'@']) {
+            let mut file = File::open(arg.split_at(1).1).unwrap();
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).unwrap();
+
+            SplitArgs::new(OsString::from(contents), false).collect::<Vec<OsString>>().into_iter()
+        } else {
+            vec!(arg.clone()).into_iter()
+        }
+    }).collect::<Vec<_>>();
+
     let res = request_compile(&mut conn, &exe_path, &cmdline, &cwd, env_vars)?;
     handle_compile_response(creator, core, &mut conn, res, &exe_path, cmdline, cwd, stdout, stderr)
 }

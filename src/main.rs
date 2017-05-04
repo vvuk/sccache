@@ -90,6 +90,8 @@ mod server;
 #[cfg(feature = "simple-s3")]
 mod simples3;
 mod util;
+mod env_splitter;
+mod osstringext;
 
 use std::env;
 use std::io::Write;

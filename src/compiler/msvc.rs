@@ -747,12 +747,6 @@ mod test {
     }
 
     #[test]
-    fn test_parse_arguments_response_file() {
-        assert_eq!(CompilerArguments::CannotCache("@file"),
-                   parse_arguments(&ovec!["-c", "foo.c", "@foo", "-Fofoo.obj"]));
-    }
-
-    #[test]
     fn test_parse_arguments_missing_pdb() {
         assert_eq!(CompilerArguments::CannotCache("shared pdb"),
                    parse_arguments(&ovec!["-c", "foo.c", "-Zi", "-Fofoo.obj"]));
