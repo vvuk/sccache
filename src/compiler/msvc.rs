@@ -50,6 +50,8 @@ pub struct MSVC {
     pub includes_prefix: String,
 }
 
+const FORCE_Z7: bool = true;
+
 impl CCompilerImpl for MSVC {
     fn kind(&self) -> CCompilerKind { CCompilerKind::MSVC }
     fn parse_arguments(&self,
@@ -240,11 +242,13 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
                 "-Fo" => output_arg = arg.take(),
                 "-deps" => depfile = arg.take(),
                 "-Fd" => {
-                    let mut common = OsString::from("-Fd");
-                    let arg = arg.take().unwrap();
-                    common.push(&arg);
-                    pdb = Some(arg);
-                    common_args.push(common);
+                    if !FORCE_Z7 {
+                        let mut common = OsString::from("-Fd");
+                        let arg = arg.take().unwrap();
+                        common.push(&arg);
+                        pdb = Some(arg);
+                        common_args.push(common);
+                    }
                 }
                 // Arguments we can't handle because they output more files.
                 // TODO: support more multi-file outputs.
@@ -252,15 +256,20 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
                 "-Fa" |
                 "-Fe" |
                 "-Fm" |
-                "-Fp" |
                 "-FR" |
-                "-Fx" => return CompilerArguments::CannotCache("multi-file output"),
+                "-Fx" |
+                "-Yc" => return CompilerArguments::CannotCache("multi-file output"),
                 "-Zi" => {
                     debug_info = true;
-                    common_args.push("-Zi".into());
+                    if FORCE_Z7 {
+                        common_args.push("-Z7".into());
+                    } else {
+                        common_args.push("-Zi".into());
+                    }
                 }
                 _ => handled = false,
             }
+
             if handled {
                 continue
             }
@@ -281,13 +290,24 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
                 // Can't cache compilations with multiple inputs.
                 return CompilerArguments::CannotCache("multiple input files")
             }
+            if output_arg.is_some() {
+                let in_arg = flag.to_str().unwrap();
+                let out_base = output_arg.as_ref().and_then(|s| s.to_str()).unwrap().to_owned();
+                if out_base.ends_with("\\") || out_base.ends_with("/") {
+                    let slash = in_arg.rfind('\\').or_else(|| in_arg.rfind('/')).unwrap_or(0);
+                    let dot = in_arg.rfind('.').expect("compile filename didn't have a dot in it");
+                    output_arg = Some((out_base + &in_arg[slash..dot] + ".obj").into());
+                }
+            }
             input_arg = Some(flag);
         }
     }
+
     // We only support compilation.
     if !compilation {
         return CompilerArguments::NotCompilation;
     }
+
     let (input, extension) = match input_arg {
         Some(i) => {
             match Path::new(&i).extension().and_then(|e| e.to_str()) {
@@ -308,7 +328,7 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
         Some(o) => {
             outputs.insert("obj", PathBuf::from(o));
             // -Fd is not taken into account unless -Zi is given
-            if debug_info {
+            if debug_info && !FORCE_Z7 {
                 match pdb {
                     Some(p) => outputs.insert("pdb", PathBuf::from(p)),
                     None => {
