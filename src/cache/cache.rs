@@ -12,19 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use app_dirs::{
-    AppDataType,
-    AppInfo,
-    app_dir,
-};
 use cache::disk::DiskCache;
 #[cfg(feature = "redis")]
 use cache::redis::RedisCache;
 #[cfg(feature = "s3")]
 use cache::s3::S3Cache;
+use config::{self, CONFIG};
 use futures_cpupool::CpuPool;
-use regex::Regex;
-use std::env;
 use std::fmt;
 use std::io::{
     self,
@@ -32,8 +26,6 @@ use std::io::{
     Seek,
     Write,
 };
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_core::reactor::Handle;
@@ -41,14 +33,6 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use zip::write::FileOptions;
 
 use errors::*;
-
-//TODO: might need to put this somewhere more central
-const APP_INFO: AppInfo = AppInfo {
-    name: "sccache",
-    author: "Mozilla",
-};
-
-const TEN_GIGS: usize = 10 * 1024 * 1024 * 1024;
 
 /// Result of a cache lookup.
 pub enum Cache {
@@ -170,79 +154,56 @@ pub trait Storage {
     fn max_size(&self) -> Option<usize>;
 }
 
-fn parse_size(val: &str) -> Option<usize> {
-    let re = Regex::new(r"^(\d+)([KMGT])$").unwrap();
-    re.captures(val)
-        .and_then(|caps| caps.at(1).and_then(|size| usize::from_str(size).ok()).and_then(|size| Some((size, caps.at(2)))))
-        .and_then(|(size, suffix)| {
-            match suffix {
-                Some("K") => Some(1024 * size),
-                Some("M") => Some(1024 * 1024 * size),
-                Some("G") => Some(1024 * 1024 * 1024 * size),
-                Some("T") => Some(1024 * 1024 * 1024 * 1024 * size),
-                _ => None,
-            }
-        })
-}
-
 /// Get a suitable `Storage` implementation from the environment.
 pub fn storage_from_environment(pool: &CpuPool, _handle: &Handle) -> Arc<Storage> {
-    if cfg!(feature = "s3") {
-        if let Ok(bucket) = env::var("SCCACHE_BUCKET") {
-            let endpoint = match env::var("SCCACHE_ENDPOINT") {
-                Ok(endpoint) => format!("{}/{}", endpoint, bucket),
-                _ => match env::var("SCCACHE_REGION") {
-                    Ok(ref region) if region != "us-east-1" =>
-                        format!("{}.s3-{}.amazonaws.com", bucket, region),
-                    _ => format!("{}.s3.amazonaws.com", bucket),
-                },
-            };
-            debug!("Trying S3Cache({})", endpoint);
-            #[cfg(feature = "s3")]
-            match S3Cache::new(&bucket, &endpoint, _handle) {
-                Ok(s) => {
-                    trace!("Using S3Cache");
-                    return Arc::new(s);
+    use config::CacheType;
+    match CONFIG.cache_type {
+        CacheType::S3(ref c) => {
+            if cfg!(feature = "s3") {
+                debug!("Trying S3Cache({})", c.endpoint);
+                #[cfg(feature = "s3")]
+                match S3Cache::new(&c.bucket, &c.endpoint, _handle) {
+                    Ok(s) => {
+                        trace!("Using S3Cache");
+                        return Arc::new(s);
+                    }
+                    Err(e) => warn!("Failed to create S3Cache: {:?}", e),
                 }
-                Err(e) => warn!("Failed to create S3Cache: {:?}", e),
+            } else {
+                warn!("S3 cache selected by config, but s3 feature was not built!");
             }
-        }
+        },
+
+        CacheType::Redis(ref c) => {
+            if cfg!(feature = "redis") {
+                debug!("Trying Redis({})", c.url);
+                #[cfg(feature = "redis")]
+                match RedisCache::new(&c.url, pool) {
+                    Ok(s) => {
+                        trace!("Using Redis: {}", url);
+                        return Arc::new(s);
+                    }
+                    Err(e) => warn!("Failed to create RedisCache: {:?}", e),
+                }
+            } else {
+                warn!("Redis cache selected by config, but redis feature was not built!");
+            }
+        },
+
+        CacheType::Disk(ref c) => {
+            trace!("Using DiskCache({:?})", c.cache_dir);
+            trace!("DiskCache size: {}", c.cache_size);
+            return Arc::new(DiskCache::new(&c.cache_dir, c.cache_size, pool))
+        },
+
+        CacheType::Invalid => {
+            panic!("Somehow got here with uninitialized CONFIG!");
+        },
     }
 
-    if cfg!(feature = "redis") {
-        if let Ok(url) = env::var("SCCACHE_REDIS") {
-            debug!("Trying Redis({})", url);
-            #[cfg(feature = "redis")]
-            match RedisCache::new(&url, pool) {
-                Ok(s) => {
-                    trace!("Using Redis: {}", url);
-                    return Arc::new(s);
-                }
-                Err(e) => warn!("Failed to create RedisCache: {:?}", e),
-            }
-        }
-    }
-
-    let d = env::var_os("SCCACHE_DIR")
-        .map(|p| PathBuf::from(p))
-        .or_else(|| app_dir(AppDataType::UserCache, &APP_INFO, "").ok())
-        // Fall back to something, even if it's not very good.
-        .unwrap_or(env::temp_dir().join("sccache_cache"));
-    trace!("Using DiskCache({:?})", d);
-    let cache_size = env::var("SCCACHE_CACHE_SIZE")
-        .ok()
-        .and_then(|v| parse_size(&v))
-        .unwrap_or(TEN_GIGS);
-    trace!("DiskCache size: {}", cache_size);
-    Arc::new(DiskCache::new(&d, cache_size, pool))
+    // Fall through to default disk cache
+    let dir = config::default_disk_cache_dir();
+    trace!("Using fallback DiskCache! ({:?})", dir);
+    return Arc::new(DiskCache::new(&dir, 10 * 1024 * 1024 * 1024, pool));
 }
 
-#[test]
-fn test_parse_size() {
-    assert_eq!(None, parse_size(""));
-    assert_eq!(None, parse_size("100"));
-    assert_eq!(Some(2048), parse_size("2K"));
-    assert_eq!(Some(10 * 1024 * 1024), parse_size("10M"));
-    assert_eq!(Some(TEN_GIGS), parse_size("10G"));
-    assert_eq!(Some(1024 * TEN_GIGS), parse_size("10T"));
-}

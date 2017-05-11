@@ -43,6 +43,8 @@ extern crate lru_disk_cache;
 extern crate fern;
 #[cfg(test)]
 extern crate itertools;
+#[macro_use]
+extern crate lazy_static;
 extern crate libc;
 #[cfg(windows)]
 extern crate mio_named_pipes;
@@ -65,6 +67,7 @@ extern crate tokio_process;
 extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_serde_bincode;
+extern crate toml;
 extern crate uuid;
 #[cfg(windows)]
 extern crate winapi;
@@ -84,6 +87,7 @@ mod client;
 mod cmdline;
 mod commands;
 mod compiler;
+mod config;
 mod mock_command;
 mod protocol;
 mod server;
@@ -100,6 +104,7 @@ fn main() {
     init_logging();
     std::process::exit(match cmdline::parse() {
         Ok(cmd) => {
+            //println!("Cache config: {:?}", *config::CONFIG);
             match commands::run_command(cmd) {
                 Ok(s) => s,
                 Err(e) =>  {

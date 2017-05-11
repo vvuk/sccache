@@ -40,6 +40,7 @@ use std::process::{self,Stdio};
 use util::{run_input_output, OsStrExt};
 
 use errors::*;
+use config::CONFIG;
 
 /// A struct on which to implement `CCompilerImpl`.
 ///
@@ -49,8 +50,6 @@ pub struct MSVC {
     /// The prefix used in the output of `-showIncludes`.
     pub includes_prefix: String,
 }
-
-const FORCE_Z7: bool = true;
 
 impl CCompilerImpl for MSVC {
     fn kind(&self) -> CCompilerKind { CCompilerKind::MSVC }
@@ -242,13 +241,13 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
                 "-Fo" => output_arg = arg.take(),
                 "-deps" => depfile = arg.take(),
                 "-Fd" => {
-                    if !FORCE_Z7 {
-                        let mut common = OsString::from("-Fd");
-                        let arg = arg.take().unwrap();
-                        common.push(&arg);
-                        pdb = Some(arg);
-                        common_args.push(common);
-                    }
+                    // if we're forcing -Z7, the -Fd will actually be ignored,
+                    // but we pass it through anyway
+                    let mut common = OsString::from("-Fd");
+                    let arg = arg.take().unwrap();
+                    common.push(&arg);
+                    pdb = Some(arg);
+                    common_args.push(common);
                 }
                 // Arguments we can't handle because they output more files.
                 // TODO: support more multi-file outputs.
@@ -261,7 +260,7 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
                 "-Yc" => return CompilerArguments::CannotCache("multi-file output"),
                 "-Zi" => {
                     debug_info = true;
-                    if FORCE_Z7 {
+                    if CONFIG.msvc_force_z7 {
                         common_args.push("-Z7".into());
                     } else {
                         common_args.push("-Zi".into());
@@ -328,7 +327,7 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
         Some(o) => {
             outputs.insert("obj", PathBuf::from(o));
             // -Fd is not taken into account unless -Zi is given
-            if debug_info && !FORCE_Z7 {
+            if debug_info && !CONFIG.msvc_force_z7 {
                 match pdb {
                     Some(p) => outputs.insert("pdb", PathBuf::from(p)),
                     None => {
