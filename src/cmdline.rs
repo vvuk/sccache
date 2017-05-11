@@ -102,21 +102,47 @@ pub fn parse() -> Result<Command> {
                 // as if it were invoked with `sccache $name`, but avoid $name resolving
                 // to ourselves again if it's in the PATH.
                 _ => {
-                    if let (Some(path), Some(exe_filename)) = (env::var_os("PATH"), exe.file_name()) {
-                        match which_in(exe_filename, Some(&path), &cwd) {
-                            Ok(ref full_path) if try!(full_path.canonicalize()) == try!(exe.canonicalize()) => {
-                                if let Some(dir) = full_path.parent() {
-                                    let path = env::join_paths(env::split_paths(&path).filter(|p| p != dir)).ok();
-                                    match which_in(exe_filename, path, &cwd) {
-                                        Ok(full_path) => args[0] = full_path.into(),
-                                        Err(_) => { }
+                    let mut found_it = false;
+                    if let Some(ref dir) = config::CONFIG.compiler_dir {
+                        let maybe_exe = dir.join(exe.file_name().unwrap());
+                        if maybe_exe.exists() {
+                            args[0] = maybe_exe.into();
+                            args.insert(0, env!("CARGO_PKG_NAME").into());
+                            found_it = true;
+                        }
+                    }
+
+                    if !found_it {
+                        if let (Some(path), Some(exe_filename)) = (env::var_os("PATH"), exe.file_name()) {
+                            match which_in(exe_filename, Some(&path), &cwd) {
+                                Ok(ref full_path) => {
+                                    // is it the same path as the exe? if so, strip that out of the path and
+                                    // try again
+                                    if try!(full_path.canonicalize()) == try!(exe.canonicalize()) {
+                                        if let Some(dir) = full_path.parent() {
+                                            let path = env::join_paths(env::split_paths(&path).filter(|p| p != dir)).ok();
+                                            match which_in(exe_filename, path, &cwd) {
+                                                Ok(full_path) => {
+                                                    args[0] = full_path.into();
+                                                    found_it = true;
+                                                }
+                                                Err(_) => { }
+                                            }
+                                        }
+                                    } else {
+                                        args[0] = full_path.into();
+                                        found_it = true;
                                     }
                                 }
+                                Err(_) => { }
                             }
-                            Ok(full_path) => args[0] = full_path.into(),
-                            Err(_) => { }
+
+                            if !found_it {
+                                panic!("sccache was called with wrapper '{:?}', but no other binary of that name found in PATH!", exe.file_name().unwrap());
+                            }
+
+                            args.insert(0, env!("CARGO_PKG_NAME").into());
                         }
-                        args.insert(0, env!("CARGO_PKG_NAME").into());
                     }
                 }
             }

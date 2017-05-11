@@ -90,6 +90,7 @@ pub struct Config {
     pub no_daemon: bool,
     pub force_recache: bool,
     pub msvc_force_z7: bool,
+    pub compiler_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -138,6 +139,7 @@ impl Config {
             no_daemon: false,
             force_recache: false,
             msvc_force_z7: false,
+            compiler_dir: None,
         };
 
         conf.stats_path = app_dir(AppDataType::UserCache, &APP_INFO, "").map(|p| p.join("saved-stats.json")).ok();
@@ -213,6 +215,7 @@ impl Config {
         conf.no_daemon = bool_from_env("SCCACHE_NO_DAEMON").or(bool_from_config("no_daemon")).unwrap_or(false);
         conf.force_recache = bool_from_env("SCCACHE_RECACHE").or(bool_from_config("force_recache")).unwrap_or(false);
         conf.msvc_force_z7 = bool_from_config("msvc_force_z7").unwrap_or(false);
+        conf.compiler_dir = string_from_config("compiler_dir").map(|s| PathBuf::from(s));
 
         conf
     }
