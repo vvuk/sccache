@@ -85,11 +85,11 @@ pub enum CacheType {
 
 #[derive(Debug)]
 pub struct Config {
+    pub stats_path: Option<PathBuf>,
     pub cache_type: CacheType,
     pub no_daemon: bool,
     pub force_recache: bool,
     pub msvc_force_z7: bool,
-    pub compiler_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -106,14 +106,6 @@ impl Config {
                 data.parse::<toml::Value>().expect("error parsing sccache config")
             })
             .unwrap_or_else(|| "".parse::<toml::Value>().unwrap());
-
-        let mut conf = Config {
-            cache_type: CacheType::Invalid,
-            no_daemon: false,
-            force_recache: false,
-            msvc_force_z7: false,
-            compiler_dir: None,
-        };
 
         let string_from_config = |conf_name: &str| -> Option<&str> {
             conf_data.get(conf_name).and_then(|v| v.as_str())
@@ -139,12 +131,16 @@ impl Config {
             env::var(env_name).ok().and_then(|v| parse_size(&v))
         }
 
-        //println!("cache_type: {:?}", conf_data.get("cache_type"));
-        // "SCCACHE_DIR"
-        // "SCCACHE_REDIS"
-        // "SCCACHE_BUCKET"
-        // "SCCACHE_ENDPOINT"
-        // "SCCACHE_REGION"
+
+        let mut conf = Config {
+            stats_path: None,
+            cache_type: CacheType::Invalid,
+            no_daemon: false,
+            force_recache: false,
+            msvc_force_z7: false,
+        };
+
+        conf.stats_path = app_dir(AppDataType::UserCache, &APP_INFO, "").map(|p| p.join("saved-stats.json")).ok();
 
         //println!("Cache type from config: {:?}", conf_data.get("cache_type"));
 
@@ -218,13 +214,6 @@ impl Config {
         conf.force_recache = bool_from_env("SCCACHE_RECACHE").or(bool_from_config("force_recache")).unwrap_or(false);
         conf.msvc_force_z7 = bool_from_config("msvc_force_z7").unwrap_or(false);
 
-        if let Some(compiler_dir) = string_from_config("compiler_dir") {
-            if !compiler_dir.ends_with("/") || !compiler_dir.ends_with("\\") {
-                conf.compiler_dir = Some(PathBuf::from(String::from(compiler_dir) +"."));
-            } else {
-                conf.compiler_dir = Some(PathBuf::from(compiler_dir));
-            }
-        }
         conf
     }
 }

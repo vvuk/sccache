@@ -25,6 +25,7 @@ use compiler::{
     MissType,
     get_compiler_info,
 };
+use config;
 use filetime::FileTime;
 use futures::future;
 use futures::sync::mpsc;
@@ -37,11 +38,12 @@ use mock_command::{
 };
 use number_prefix::{binary_prefix, Prefixed, Standalone};
 use protocol::{Compile, CompileFinished, CompileResponse, Request, Response};
+use serde_json;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs::metadata;
+use std::fs::{self, File, metadata};
 use std::io::{self, Write};
 use std::net::{SocketAddr, SocketAddrV4, Ipv4Addr};
 use std::path::PathBuf;
@@ -209,6 +211,9 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
     {
         let SccacheServer { mut core, listener, rx, service, timeout, wait } = self;
 
+        // Keep a ref of stats around
+        let stats = service.stats.clone();
+
         // Create our "server future" which will simply handle all incoming
         // connections in separate tasks.
         let handle = core.handle();
@@ -268,6 +273,14 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
         // don't want to wait *too* long.
         core.run(wait.select(Timeout::new(Duration::new(10, 0), &handle)?))
             .map_err(|p| p.0)?;
+
+        info!("saving stats...");
+        if let Some(ref stats_path) = config::CONFIG.stats_path {
+            if let Ok(mut file) = File::create(stats_path) {
+                let stats = stats.borrow().clone();
+                serde_json::to_writer(&mut file, &stats).ok();
+            }
+        }
 
         info!("ok, fully shutting down now");
 
@@ -378,8 +391,15 @@ impl<C> SccacheService<C>
                pool: CpuPool,
                tx: mpsc::Sender<ServerMessage>,
                info: ActiveInfo) -> SccacheService<C> {
+        let mut starting_stats = ServerStats::default();
+        if let Some(ref stats_path) = config::CONFIG.stats_path {
+            if let Ok(file) = File::open(stats_path) {
+                starting_stats = serde_json::from_reader(file).unwrap_or(ServerStats::default());
+            }
+        }
+
         SccacheService {
-            stats: Rc::new(RefCell::new(ServerStats::default())),
+            stats: Rc::new(RefCell::new(starting_stats)),
             storage: storage,
             compilers: Rc::new(RefCell::new(HashMap::new())),
             pool: pool,
@@ -403,6 +423,9 @@ impl<C> SccacheService<C>
     /// Zero stats about the cache.
     fn zero_stats(&self) {
         *self.stats.borrow_mut() = ServerStats::default();
+        if let Some(ref stats_path) = config::CONFIG.stats_path {
+            fs::remove_file(stats_path).ok();
+        }
     }
 
 
