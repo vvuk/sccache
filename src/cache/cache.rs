@@ -157,6 +157,7 @@ pub trait Storage {
 /// Get a suitable `Storage` implementation from the environment.
 pub fn storage_from_environment(pool: &CpuPool, _handle: &Handle) -> Arc<Storage> {
     use config::CacheType;
+    println!("storage_from_environment: {:?}", *config::CONFIG);
     match CONFIG.cache_type {
         CacheType::S3(ref c) => {
             if cfg!(feature = "s3") {
@@ -180,7 +181,7 @@ pub fn storage_from_environment(pool: &CpuPool, _handle: &Handle) -> Arc<Storage
                 #[cfg(feature = "redis")]
                 match RedisCache::new(&c.url, pool) {
                     Ok(s) => {
-                        trace!("Using Redis: {}", url);
+                        trace!("Using Redis: {}", c.url);
                         return Arc::new(s);
                     }
                     Err(e) => warn!("Failed to create RedisCache: {:?}", e),
