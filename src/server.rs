@@ -214,6 +214,9 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
         // Keep a ref of stats around
         let stats = service.stats.clone();
 
+        // are we for testing?
+        let test_service = service.storage.is_test();
+
         // Create our "server future" which will simply handle all incoming
         // connections in separate tasks.
         let handle = core.handle();
@@ -274,11 +277,13 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
         core.run(wait.select(Timeout::new(Duration::new(10, 0), &handle)?))
             .map_err(|p| p.0)?;
 
-        info!("saving stats...");
-        if let Some(ref stats_path) = config::CONFIG.stats_path {
-            if let Ok(mut file) = File::create(stats_path) {
-                let stats = stats.borrow().clone();
-                serde_json::to_writer(&mut file, &stats).ok();
+        if test_service {
+            info!("saving stats...");
+            if let Some(ref stats_path) = config::CONFIG.stats_path {
+                if let Ok(mut file) = File::create(stats_path) {
+                    let stats = stats.borrow().clone();
+                    serde_json::to_writer(&mut file, &stats).ok();
+                }
             }
         }
 
@@ -392,9 +397,11 @@ impl<C> SccacheService<C>
                tx: mpsc::Sender<ServerMessage>,
                info: ActiveInfo) -> SccacheService<C> {
         let mut starting_stats = ServerStats::default();
-        if let Some(ref stats_path) = config::CONFIG.stats_path {
-            if let Ok(file) = File::open(stats_path) {
-                starting_stats = serde_json::from_reader(file).unwrap_or(ServerStats::default());
+        if !storage.is_test() {
+            if let Some(ref stats_path) = config::CONFIG.stats_path {
+                if let Ok(file) = File::open(stats_path) {
+                    starting_stats = serde_json::from_reader(file).unwrap_or(ServerStats::default());
+                }
             }
         }
 
@@ -423,8 +430,10 @@ impl<C> SccacheService<C>
     /// Zero stats about the cache.
     fn zero_stats(&self) {
         *self.stats.borrow_mut() = ServerStats::default();
-        if let Some(ref stats_path) = config::CONFIG.stats_path {
-            fs::remove_file(stats_path).ok();
+        if !self.storage.is_test() {
+            if let Some(ref stats_path) = config::CONFIG.stats_path {
+                fs::remove_file(stats_path).ok();
+            }
         }
     }
 

@@ -152,6 +152,9 @@ pub trait Storage {
 
     /// Get the maximum storage size, if applicable.
     fn max_size(&self) -> Option<usize>;
+
+    /// Is this storage configured for test purposes?
+    fn is_test(&self) -> bool { false }
 }
 
 /// Get a suitable `Storage` implementation from the environment.

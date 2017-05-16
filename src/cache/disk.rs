@@ -36,6 +36,8 @@ pub struct DiskCache {
     lru: Arc<Mutex<LruDiskCache>>,
     /// Thread pool to execute disk I/O
     pool: CpuPool,
+    /// is this a testing storage
+    testing: bool,
 }
 
 impl DiskCache {
@@ -47,7 +49,16 @@ impl DiskCache {
             //TODO: change this function to return a Result
             lru: Arc::new(Mutex::new(LruDiskCache::new(root, max_size).expect("Couldn't instantiate disk cache!"))),
             pool: pool.clone(),
+            testing: false,
         }
+    }
+
+    pub fn new_for_testing<T: AsRef<OsStr>>(root: &T,
+                                            max_size: usize,
+                                            pool: &CpuPool) -> DiskCache {
+        let mut dc = DiskCache::new(root, max_size, pool);
+        dc.testing = true;
+        dc
     }
 }
 
@@ -101,4 +112,8 @@ impl Storage for DiskCache {
 
     fn current_size(&self) -> Option<usize> { Some(self.lru.lock().unwrap().size()) }
     fn max_size(&self) -> Option<usize> { Some(self.lru.lock().unwrap().capacity()) }
+
+    fn is_test(&self) -> bool {
+        self.testing
+    }
 }

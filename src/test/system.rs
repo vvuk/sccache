@@ -146,6 +146,8 @@ fn run_sccache_command_test(sccache: &Path, compiler: Compiler, tempdir: &Path) 
     let out_file = tempdir.join("test.o");
     let input = source_file.file_name().unwrap().to_str().unwrap();
     let output = out_file.file_name().unwrap().to_str().unwrap();
+    trace!("zero stats");
+    assert_eq!(true, run(sccache, &["-z"], tempdir, &[]));
     trace!("compile");
     assert_eq!(true, run(sccache, &compile_cmdline(name, &exe, &input, &output), tempdir, &env_vars));
     assert_eq!(true, fs::metadata(&out_file).and_then(|m| Ok(m.len() > 0)).unwrap());

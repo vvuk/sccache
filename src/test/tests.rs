@@ -73,7 +73,7 @@ fn run_server_thread<T>(cache_dir: &Path, options: T)
                             .map(|s| *s)
                             .unwrap_or(usize::MAX);
     let pool = CpuPool::new(1);
-    let storage = Arc::new(DiskCache::new(&cache_dir, cache_size, &pool));
+    let storage = Arc::new(DiskCache::new_for_testing(&cache_dir, cache_size, &pool));
 
     // Create a server on a background thread, get some useful bits from it.
     let (tx, rx) = mpsc::channel();
