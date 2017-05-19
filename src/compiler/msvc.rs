@@ -193,11 +193,13 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
     let mut output_arg = None;
     let mut input_arg = None;
     let mut common_args = vec!();
+    let mut preprocessor_args = vec!();
     let mut compilation = false;
     let mut debug_info = false;
     let mut pdb = None;
     let mut depfile = None;
     let mut show_includes = false;
+    let mut force_input_type = None;
 
     // First convert all `/foo` arguments to `-foo` to accept both styles
     let it = arguments.iter().map(|i| {
@@ -228,6 +230,15 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
             let mut handled = true;
             match s {
                 "-c" => compilation = true,
+                // compile-as C++/C
+                "-TP" => {
+                    force_input_type = Some("c++");
+                    preprocessor_args.push(s.into());
+                }
+                "-TC" => {
+                    force_input_type = Some("c");
+                    preprocessor_args.push(s.into());
+                }
                 "-FI" => {
                     common_args.push("-FI".into());
                     if let Some((arg_val, flag)) = it.next() {
@@ -309,11 +320,16 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
 
     let (input, extension) = match input_arg {
         Some(i) => {
-            match Path::new(&i).extension().and_then(|e| e.to_str()) {
-                Some(e) => (i.to_owned(), e.to_owned()),
-                _ => {
-                    trace!("Bad or missing source extension: {:?}", i);
-                    return CompilerArguments::CannotCache("unknown source extension");
+            if let Some(input_type) = force_input_type {
+                trace!("force_input_type: {}", input_type);
+                (i.to_owned(), input_type.to_owned())
+            } else {
+                match Path::new(&i).extension().and_then(|e| e.to_str()) {
+                    Some(e @ "c") | Some(e @ "cc") | Some(e @ "cpp") | Some(e @ "cxx") | Some(e @ "c++") => (i.to_owned(), e.to_owned()),
+                    _ => {
+                        trace!("Unknown source extension: {:?}", i);
+                        return CompilerArguments::CannotCache("unknown source extension");
+                    }
                 }
             }
         }
@@ -345,7 +361,7 @@ pub fn parse_arguments(arguments: &[OsString]) -> CompilerArguments<ParsedArgume
         extension: extension,
         depfile: depfile.map(|d| d.into()),
         outputs: outputs,
-        preprocessor_args: vec!(),
+        preprocessor_args: preprocessor_args,
         common_args: common_args,
         msvc_show_includes: show_includes,
     })
@@ -404,9 +420,10 @@ pub fn preprocess<T>(creator: &T,
 {
     let mut cmd = creator.clone().new_command_sync(executable);
     cmd.arg("-E")
-        .arg(&parsed_args.input)
         .arg("-nologo")
+        .args(&parsed_args.preprocessor_args)
         .args(&parsed_args.common_args)
+        .arg(&parsed_args.input)
         .env_clear()
         .envs(env_vars.iter().map(|&(ref k, ref v)| (k, v)))
         .current_dir(&cwd);
@@ -514,8 +531,16 @@ fn compile<T>(creator: &T,
 
     let mut cmd = creator.clone().new_command_sync(executable);
     cmd.arg("-c")
-        .arg(&fo)
+        .arg(match parsed_args.extension.as_ref() {
+            "c" => "-TC",
+            "c++" | "cc" | "cpp" | "cxx" => "-TP",
+            e => {
+                error!("msvc::compile: Got an unexpected file extension {}", e);
+                return f_err("Unexpected file extension")
+            }
+        })
         .args(&parsed_args.common_args)
+        .arg(&fo)
         .env_clear()
         .envs(env_vars.iter().map(|&(ref k, ref v)| (k, v)))
         .current_dir(&cwd);

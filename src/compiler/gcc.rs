@@ -121,6 +121,7 @@ fn _parse_arguments(arguments: &[OsString],
     let mut compilation = false;
     let mut split_dwarf = false;
     let mut need_explicit_dep_target = false;
+    let mut force_input_type = None;
 
     // Custom iterator to expand `@` arguments which stand for reading a file
     // and interpreting it as a list of more arguments.
@@ -146,6 +147,17 @@ fn _parse_arguments(arguments: &[OsString],
                     if let Some(arg_val) = it.next() {
                         common_args.push(arg_val);
                     }
+                },
+                // if the input type is forced, we're going to record this
+                // so that we can give the proper -x option later on.  We
+                // also need to give this to the preprocessor.
+                "-x" => {
+                    let arg_val = it.next().unwrap();
+                    // the extension/input_type will handle putting this on
+                    // the compile command, so put this into preprocessor_args only
+                    preprocessor_args.push(arg.clone());
+                    preprocessor_args.push(arg_val.clone());
+                    force_input_type = Some(arg_val.to_str().unwrap().to_owned());
                 },
                 "-MF" |
                 "-MQ" => {
@@ -190,6 +202,7 @@ fn _parse_arguments(arguments: &[OsString],
             if input_arg.is_some() || arg.as_os_str() == "-" {
                 // Can't cache compilations with multiple inputs
                 // or compilation from stdin.
+                trace!("multiple input files -- already had file {:?}, new input {:?}", input_arg, arg);
                 return CompilerArguments::CannotCache("multiple input files");
             }
             input_arg = Some(arg);
@@ -204,11 +217,16 @@ fn _parse_arguments(arguments: &[OsString],
         Some(i) => {
             // When compiling from the preprocessed output given as stdin, we need
             // to explicitly pass its file type.
-            match Path::new(&i).extension().and_then(|e| e.to_str()) {
-                Some(e @ "c") | Some(e @ "cc") | Some(e @ "cpp") | Some(e @ "cxx") => (i.to_owned(), e.to_owned()),
-                e => {
-                    trace!("Unknown source extension: {}", e.unwrap_or("(None)"));
-                    return CompilerArguments::CannotCache("unknown source extension");
+            if let Some(input_type) = force_input_type {
+                trace!("force_input_type: {}", input_type);
+                (i.to_owned(), input_type.clone())
+            } else {
+                match Path::new(&i).extension().and_then(|e| e.to_str()) {
+                    Some(e @ "c") | Some(e @ "cc") | Some(e @ "cpp") | Some(e @ "cxx") | Some(e @ "c++") => (i.to_owned(), e.to_owned()),
+                    e => {
+                        trace!("Unknown source extension: {}", e.unwrap_or("(None)"));
+                        return CompilerArguments::CannotCache("unknown source extension");
+                    }
                 }
             }
         }
@@ -255,9 +273,9 @@ pub fn preprocess<T>(creator: &T,
     trace!("preprocess");
     let mut cmd = creator.clone().new_command_sync(executable);
     cmd.arg("-E")
-        .arg(&parsed_args.input)
         .args(&parsed_args.preprocessor_args)
         .args(&parsed_args.common_args)
+        .arg(&parsed_args.input)
         .env_clear()
         .envs(env_vars.iter().map(|&(ref k, ref v)| (k, v)))
         .current_dir(cwd);
@@ -277,7 +295,7 @@ fn compile<T>(creator: &T,
               -> SFuture<(Cacheable, process::Output)>
     where T: CommandCreatorSync
 {
-    trace!("compile");
+    trace!("compile - {:?} (extension {})", parsed_args.input, parsed_args.extension);
 
     let output = match parsed_args.outputs.get("obj") {
         Some(obj) => obj,
@@ -290,7 +308,7 @@ fn compile<T>(creator: &T,
     cmd.args(&["-c", "-x"])
         .arg(match parsed_args.extension.as_ref() {
             "c" => "cpp-output",
-            "cc" | "cpp" | "cxx" => "c++-cpp-output",
+            "c++" | "cc" | "cpp" | "cxx" => "c++-cpp-output",
             e => {
                 error!("gcc::compile: Got an unexpected file extension {}", e);
                 return future::err("Unexpected file extension".into()).boxed()
