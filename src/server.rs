@@ -277,7 +277,7 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
         core.run(wait.select(Timeout::new(Duration::new(10, 0), &handle)?))
             .map_err(|p| p.0)?;
 
-        if test_service {
+        if !test_service {
             info!("saving stats...");
             if let Some(ref stats_path) = config::CONFIG.stats_path {
                 if let Ok(mut file) = File::create(stats_path) {
@@ -503,6 +503,7 @@ impl<C> SccacheService<C>
                       env_vars: Vec<(OsString, OsString)>) -> SccacheResponse
     {
         let mut stats = self.stats.borrow_mut();
+        let mut cannot_cache = None;
         match compiler {
             None => {
                 debug!("check_compiler: Unsupported compiler");
@@ -523,6 +524,7 @@ impl<C> SccacheService<C>
                     }
                     CompilerArguments::CannotCache(why) => {
                         //TODO: save counts of why
+                        cannot_cache = Some(format!("Cannot cache: {}", why));
                         debug!("parse_arguments: CannotCache({})", why);
                         stats.requests_not_cacheable += 1;
                     }
@@ -534,7 +536,7 @@ impl<C> SccacheService<C>
             }
         }
 
-        let res = CompileResponse::UnhandledCompile;
+        let res = CompileResponse::UnhandledCompile(cannot_cache);
         Message::WithoutBody(Response::Compile(res))
     }
 

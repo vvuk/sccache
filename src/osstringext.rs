@@ -1,4 +1,3 @@
-#[cfg(target_os = "windows")]
 use std::ffi::OsStr;
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;

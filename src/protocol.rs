@@ -33,7 +33,7 @@ pub enum CompileResponse {
     /// The compilation was started.
     CompileStarted,
     /// The server could not handle this compilation request.
-    UnhandledCompile,
+    UnhandledCompile(Option<String>),
 }
 
 /// Information about a finished compile, either from cache or executed locally.

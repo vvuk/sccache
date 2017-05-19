@@ -17,6 +17,7 @@ use clap::{
     AppSettings,
     Arg,
 };
+use config;
 use errors::*;
 use std::env;
 use std::ffi::OsString;

@@ -501,8 +501,8 @@ fn handle_compile_response<T>(mut creator: T,
                 }),
             }
         }
-        CompileResponse::UnhandledCompile => {
-            debug!("Server sent UnhandledCompile");
+        CompileResponse::UnhandledCompile(ref maybe_msg) => {
+            debug!("Server sent UnhandledCompile: reason: {:?}", maybe_msg);
         }
     };
 

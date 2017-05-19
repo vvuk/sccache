@@ -1,6 +1,5 @@
 // from https://github.com/tormol/clap-rs/blob/env_splitter/src/app/env_splitter.rs
 
-#[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
 use ::osstringext::OsStrExt3;

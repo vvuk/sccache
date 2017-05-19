@@ -53,6 +53,7 @@ impl DiskCache {
         }
     }
 
+    #[cfg(test)]
     pub fn new_for_testing<T: AsRef<OsStr>>(root: &T,
                                             max_size: usize,
                                             pool: &CpuPool) -> DiskCache {
